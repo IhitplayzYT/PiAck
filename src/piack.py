@@ -9,7 +9,7 @@ import subprocess
 import json
 from typing import Dict, List, Optional
 from fastapi import UploadFile, Form
-
+import uuid
 
 def parse_config(json):
     assert globals.ROOT is not None
@@ -34,13 +34,29 @@ def parse_config(json):
         subprocess.run(json["command"], shell=True)
     if json["down"]:
         globals.DOWN = bool(json["down"])
-    
-    
+    if json["delete"]:
+        for i in json["delete"]:
+            remove_mail(i)
+    if json["add"]:
+        for i in json["delete"]:
+            add_mail(i)
+    if json["chname"]:
+        l = len(json["chname"])
+        if not l & 1:
+            return
+        else:
+            for i in range(l//2):
+                change_mail(json["chname"][2 * i],json["chname"][2 * i+1])
 
-        
-        
+def change_mail(old: str,new:str):
+    os.rename(Path(os.curdir) / old,Path(os.curdir) / new)
 
-        
+def remove_mail(mailbx:str):
+    shutil.rmtree(Path(os.curdir) / mailbox)
+
+def add_mail(mailbox:str):
+    os.mkdir(Path(os.curdir) / mailbox)
+
 async def restart():
     await asyncio.sleep(1)
     args = sys.argv.copy()
@@ -52,19 +68,8 @@ async def restart():
     os.execv(sys.executable, [sys.executable] + args)
 
 
-def store_file_chunk(
-    sender: str,
-    file_id: str,
-    chunk_idx: int,
-    chunk_data: bytes,
-    total_chunks: int,
-    relative_path: str,
-    file_name: Optional[str] = None,
-    recipient: Optional[str] = None
-) -> bool:
-    """Store a file chunk and return True if file is complete."""
+def store_file_chunk(sender: str,file_id: str,chunk_idx: int,chunk_data: bytes,tot_chunks: int,rel_path: str,fname: Optional[str] = None,recipient: Optional[str] = None) -> bool:
     assert globals.ROOT is not None
-    
     if sender not in globals.file_storage:
         globals.file_storage[sender] = {}
     
@@ -72,73 +77,58 @@ def store_file_chunk(
         globals.file_storage[sender][file_id] = {
             "chunks": {},
             "metadata": {
-                "total_chunks": total_chunks,
-                "relative_path": relative_path,
-                "file_name": file_name,
+                "total_chunks": tot_chunks,
+                "relative_path": rel_path,
+                "file_name": fname,
                 "sender": sender,
                 "recipient": recipient
             }
         }
-    
     globals.file_storage[sender][file_id]["chunks"][chunk_idx] = chunk_data
     
-    # Check if file is complete
     stored_chunks = len(globals.file_storage[sender][file_id]["chunks"])
-    is_complete = stored_chunks == total_chunks
-    
-    if is_complete and recipient:
-        # Assemble and save to recipient's directory
-        complete_data = assemble_file(sender, file_id)
-        if complete_data:
-            recipient_dir = globals.ROOT / recipient
-            recipient_dir.mkdir(parents=True, exist_ok=True)
+    if (len(globals.file_storage[sender][file_id]["chunks"]) == tot_chunks) and recipient:
+        full_data = assemble_file(sender, file_id)
+        if full_data:
+            recip_dir = globals.ROOT / recipient
+            recip_dir.mkdir(parents=True, exist_ok=True)
             
-            # Use relative_path as filename, or file_name if available
-            save_path = recipient_dir / relative_path
+            save_path = recip_dir / rel_path 
             save_path.parent.mkdir(parents=True, exist_ok=True)
             
             with open(save_path, 'wb') as f:
-                f.write(complete_data)
-            
-            # Clear chunks from memory after saving to disk
+                f.write(full_data)
             globals.file_storage[sender][file_id]["chunks"] = {}
-            
-            # Save cache
             save_cache()
-    
-    return is_complete
+            return True 
+        else:
+            return False
+    return True
 
 
 def assemble_file(sender: str, file_id: str) -> Optional[bytes]:
-    """Assemble all chunks into complete file data."""
     if sender not in globals.file_storage or file_id not in globals.file_storage[sender]:
         return None
-    
     file_data = globals.file_storage[sender][file_id]
     chunks = file_data["chunks"]
-    total_chunks = file_data["metadata"]["total_chunks"]
-    
-    if len(chunks) != total_chunks:
+    tot_chunks = file_data["metadata"]["total_chunks"]
+    if len(chunks) != tot_chunks:
         return None
-    
-    # Assemble chunks in order
-    complete_data = b""
-    for i in range(total_chunks):
+    ret = b""
+    for i in range(tot_chunks):
+        # Missing Chunk
         if i not in chunks:
             return None
-        complete_data += chunks[i]
-    
-    return complete_data
+        ret += chunks[i]
+    return ret
 
 
 def load_file_from_disk(recipient: str, relative_path: str) -> Optional[bytes]:
-    """Load file from recipient's directory on disk."""
     assert globals.ROOT is not None
+
     file_path = globals.ROOT / recipient / relative_path
-    
     if not file_path.exists():
         return None
-    
     with open(file_path, 'rb') as f:
         return f.read()
 
@@ -146,97 +136,79 @@ def load_file_from_disk(recipient: str, relative_path: str) -> Optional[bytes]:
 def add_to_mailbox(recipient: str, file_id: str):
     if recipient not in globals.mailbox:
         globals.mailbox[recipient] = []
-    if file_id not in globals.mailbox[recipient]:
-        globals.mailbox[recipient].append(file_id)
+    if file_id not in globals.mailbox[recipient][0]:
+        globals.mailbox[recipient][1].append(file_id)
+        globals.mailbox[recipient][0].add(file_id)
 
 
 def get_mailbox_files(recipient: str) -> List[Dict]:
-    """Get list of files in recipient's mailbox from disk."""
     assert globals.ROOT is not None
-    recipient_dir = globals.ROOT / recipient
-    
-    if not recipient_dir.exists():
+    src_dir = globals.ROOT / recipient 
+    if not src_dir.exists():
         return []
-    
     files = []
-    for file_path in recipient_dir.rglob("*"):
+    for file_path in src_dir.rglob("*"):
         if file_path.is_file():
-            relative_path = str(file_path.relative_to(recipient_dir))
+            rel_path = str(file_path.relative_to(src_dir))
             files.append({
-                "name": relative_path,
+                "name": rel_path,
                 "size": file_path.stat().st_size,
-                "sender": "cached",
-                "file_id": relative_path.replace("/", "_"),
-                "relative_path": relative_path
-            })
-    
+                "sender": "CACHED",
+                "file_id": rel_path.replace("/", "_"),
+                "relative_path": rel_path
+                })
     return files
 
 
 def get_sender_files(sender: str) -> List[Dict]:
-    """Get list of files from a specific sender's directory on disk."""
     assert globals.ROOT is not None
     sender_dir = globals.ROOT / sender
-    
     if not sender_dir.exists():
         return []
-    
     files = []
     for file_path in sender_dir.rglob("*"):
         if file_path.is_file():
-            relative_path = str(file_path.relative_to(sender_dir))
+            rel_path = str(file_path.relative_to(sender_dir))
             files.append({
-                "name": relative_path,
+                "name": rel_path,
                 "size": file_path.stat().st_size,
                 "sender": sender,
-                "file_id": relative_path.replace("/", "_"),
-                "relative_path": relative_path
+                "file_id": rel_path.replace("/", "_"),
+                "relative_path": rel_path
             })
-    
     return files
 
 
 def cleanup_file(sender: str, file_id: str):
-    """Remove file from storage after sending."""
     if sender in globals.file_storage and file_id in globals.file_storage[sender]:
         del globals.file_storage[sender][file_id]
 
 
 def create_multipart_response(files: List[Dict], receiver: str) -> tuple[bytes, str]:
-    """Create multipart response body and content-type header from disk."""
-    import uuid
     boundary = str(uuid.uuid4())
-    
     body = b""
     for file_info in files:
         sender = file_info["sender"]
         relative_path = file_info["relative_path"]
-        
         # Load file from disk
         file_data = load_file_from_disk(sender, relative_path)
-        
         if file_data is None:
             continue
-        
         filename = file_info["name"]
-        
-        # Add part headers
+                # Add part headers
         part_headers = f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
         part_headers += "\r\n"
-        
         body += f"--{boundary}\r\n".encode()
         body += part_headers.encode()
         body += file_data
         body += b"\r\n"
-    
     body += f"--{boundary}--\r\n".encode()
-    
     content_type = f"multipart/form-data; boundary={boundary}"
     return body, content_type
 
 
 def save_cache():
-    """Save file_storage and mailbox to cache.json."""
+    """Save file_storage and the mailbox to a cache.json located in the root of the Remote."""
     assert globals.ROOT is not None
     cache_path = globals.ROOT / globals.CACHE_FILE
     
@@ -249,11 +221,10 @@ def save_cache():
     for sender, sender_files in globals.file_storage.items():
         cache_data["file_storage"][sender] = {}
         for file_id, file_data in sender_files.items():
-            # Store metadata only, chunks are saved to disk
+            # chunks are saved to disk
             cache_data["file_storage"][sender][file_id] = {
                 "metadata": file_data["metadata"]
             }
-    
     with open(cache_path, 'w') as f:
         json.dump(cache_data, f, indent=2)
 
@@ -262,22 +233,18 @@ def load_cache():
     """Load file_storage and mailbox from cache.json."""
     assert globals.ROOT is not None
     cache_path = globals.ROOT / globals.CACHE_FILE
-    
     if not cache_path.exists():
         return
-    
     with open(cache_path, 'r') as f:
         cache_data = json.load(f)
-    
-    # Restore mailbox
     globals.mailbox = cache_data.get("mailbox", {})
     
-    # Restore file_storage metadata (chunks will be loaded from disk)
+    # (chunks will be loaded from disk)
     for sender, sender_files in cache_data.get("file_storage", {}).items():
         globals.file_storage[sender] = {}
         for file_id, file_data in sender_files.items():
             globals.file_storage[sender][file_id] = {
-                "chunks": {},  # Chunks loaded from disk on demand
+                "chunks": {}, 
                 "metadata": file_data["metadata"]
             }
 
