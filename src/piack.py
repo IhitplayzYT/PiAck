@@ -38,7 +38,7 @@ def parse_config(json):
         for i in json["delete"]:
             remove_mail(i)
     if json["add"]:
-        for i in json["delete"]:
+        for i in json["add"]:
             add_mail(i)
     if json["chname"]:
         l = len(json["chname"])
@@ -52,7 +52,7 @@ def change_mail(old: str,new:str):
     os.rename(Path(os.curdir) / old,Path(os.curdir) / new)
 
 def remove_mail(mailbx:str):
-    shutil.rmtree(Path(os.curdir) / mailbox)
+    shutil.rmtree(Path(os.curdir) / mailbx)
 
 def add_mail(mailbox:str):
     os.mkdir(Path(os.curdir) / mailbox)
@@ -68,7 +68,7 @@ async def restart():
     os.execv(sys.executable, [sys.executable] + args)
 
 
-def store_file_chunk(sender: str,file_id: str,chunk_idx: int,chunk_data: bytes,tot_chunks: int,rel_path: str,fname: Optional[str] = None,recipient: Optional[str] = None) -> bool:
+def store_file_chunk(sender: str,file_id: str,chunk_idx: int,chunk_data: bytes,total_chunks: int,relative_path: str,fname: Optional[str] = None,recipient: Optional[str] = None) -> bool:
     assert globals.ROOT is not None
     if sender not in globals.file_storage:
         globals.file_storage[sender] = {}
@@ -77,8 +77,8 @@ def store_file_chunk(sender: str,file_id: str,chunk_idx: int,chunk_data: bytes,t
         globals.file_storage[sender][file_id] = {
             "chunks": {},
             "metadata": {
-                "total_chunks": tot_chunks,
-                "relative_path": rel_path,
+                "total_chunks": total_chunks,
+                "relative_path": relative_path,
                 "file_name": fname,
                 "sender": sender,
                 "recipient": recipient
@@ -87,13 +87,13 @@ def store_file_chunk(sender: str,file_id: str,chunk_idx: int,chunk_data: bytes,t
     globals.file_storage[sender][file_id]["chunks"][chunk_idx] = chunk_data
     
     stored_chunks = len(globals.file_storage[sender][file_id]["chunks"])
-    if (len(globals.file_storage[sender][file_id]["chunks"]) == tot_chunks) and recipient:
+    if (len(globals.file_storage[sender][file_id]["chunks"]) == total_chunks) and recipient:
         full_data = assemble_file(sender, file_id)
         if full_data:
             recip_dir = globals.ROOT / recipient
             recip_dir.mkdir(parents=True, exist_ok=True)
             
-            save_path = recip_dir / rel_path 
+            save_path = recip_dir / relative_path 
             save_path.parent.mkdir(parents=True, exist_ok=True)
             
             with open(save_path, 'wb') as f:
@@ -135,7 +135,7 @@ def load_file_from_disk(recipient: str, relative_path: str) -> Optional[bytes]:
 
 def add_to_mailbox(recipient: str, file_id: str):
     if recipient not in globals.mailbox:
-        globals.mailbox[recipient] = []
+        globals.mailbox[recipient] = (set(), [])
     if file_id not in globals.mailbox[recipient][0]:
         globals.mailbox[recipient][1].append(file_id)
         globals.mailbox[recipient][0].add(file_id)

@@ -45,7 +45,7 @@ async def recv_config(req: Request):
 async def send_small_file(dst_mail: str,file_id: str,file: UploadFile = File(...),file_id_form: str = Form(...),sender: str = Form(...),relative_path: str = Form(...)):
     file_content = await file.read()
     # Stroe full file as single chunk data
-    if store_file_chunk(sender=sender,file_id=file_id,chunk_idx=0,chunk_data=file_content,total_chunks=1,relative_path=relative_path,file_name=file.filename,recipient=dst_mail):
+    if piack.store_file_chunk(sender=sender,file_id=file_id,chunk_idx=0,chunk_data=file_content,total_chunks=1,relative_path=relative_path,file_name=file.filename,recipient=dst_mail):
         piack.add_to_mailbox(dst_mail, file_id)
     return {"status": "Ok"}
 
@@ -59,7 +59,7 @@ async def send_large_file_chunk(dst_mail: str,file_id: str,chunk_idx: int,req: R
     sender = req.headers.get("X-Sender", "unknown")
     rel_fpath = req.headers.get("X-Relative-Path", "")
     
-    if piack.store_file_chunk(sender=sender,file_id=file_id,chunk_idx=chunk_idx,chunk_data=data,total_chun=tot_chnks,relative_path=rel_fpath,recipient=dst_mail):
+    if piack.store_file_chunk(sender=sender,file_id=file_id,chunk_idx=chunk_idx,chunk_data=data,total_chunks=tot_chnks,relative_path=rel_fpath,recipient=dst_mail):
         piack.add_to_mailbox(dst_mail, file_id)
     return {"status": "Ok"}
 
@@ -84,7 +84,7 @@ async def receive_mailbox(req: Request):
     f_data = piack.load_file_from_disk(receiver, f_info["relative_path"])
     if f_data is None:
         return Response(status_code=404, content=b"File not found")
-    ret = Response(content=file_data, media_type="application/octet-stream")
+    ret = Response(content=f_data, media_type="application/octet-stream")
     ret.headers["X-File-Name"] = f_info["name"]
     return ret 
 
@@ -97,7 +97,7 @@ async def receive_from_sender(src_mail: str, req: Request):
         return Response(content=b"No Files in Remote", media_type="application/json")
 
     if len(files) > 1:
-        body, content_type = piack.create_multipart_ret(files, receiver)
+        body, content_type = piack.create_multipart_response(files, receiver)
         return Response(content=body, media_type=content_type)
     f_info = files[0]
     f_data = piack.load_file_from_disk(src_mail, f_info["relative_path"])

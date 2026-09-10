@@ -13,4 +13,4 @@ CACHE_FILE = "cache.json"
 
 # File storage: {sender: {file_id: {\"chunks\": {chunk_idx: data}, \"metadata\": {...}}}}
 file_storage: Dict[str, Dict[str, Dict]] = {}
-mailbox: Dict[str, (set[str],List[str])] = {} 
+mailbox: Dict[str, tuple[set[str], List[str]]] = {} 

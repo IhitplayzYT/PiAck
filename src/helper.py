@@ -16,7 +16,7 @@ class CLI:
             elif i in {"-f","--flush","-F","--Flush"}:
                 self.flush = True
             else:
-                if i.startswith("--src=") or i.startswit("--src-dir=") or i.startswith("-s="):
+                if i.startswith("--src=") or i.startswith("--src-dir=") or i.startswith("-s="):
                     self.src_dir = i[i.find("=")+1:]
                 elif i.startswith("--port=") or i.startswith("-p="):
                     self.port = int(i[i.find("=")+1:])
